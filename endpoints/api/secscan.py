@@ -55,7 +55,7 @@ MAPPED_STATUSES[
 logger = logging.getLogger(__name__)
 
 
-def _security_info(manifest_or_legacy_image, include_vulnerabilities=True):
+def _security_info(manifest_or_legacy_image, include_vulnerabilities=True, raw=False):
     """
     Returns a dict representing the result of a call to the security status API for the given
     manifest or image.
@@ -63,8 +63,13 @@ def _security_info(manifest_or_legacy_image, include_vulnerabilities=True):
     result = secscan_model.load_security_information(
         manifest_or_legacy_image,
         include_vulnerabilities=include_vulnerabilities,
+        raw=raw,
         model_cache=model_cache,
     )
+
+    if raw:
+        return result
+
     if result.status == ScanLookupStatus.UNKNOWN_MANIFEST_OR_IMAGE:
         raise NotFound()
 
@@ -74,9 +79,11 @@ def _security_info(manifest_or_legacy_image, include_vulnerabilities=True):
     assert result.status in MAPPED_STATUSES
     return {
         "status": MAPPED_STATUSES[result.status].value,
-        "data": result.security_information.to_dict()
-        if result.security_information is not None
-        else None,
+        "data": (
+            result.security_information.to_dict()
+            if result.security_information is not None
+            else None
+        ),
     }
 
 
@@ -84,6 +91,7 @@ def _security_info(manifest_or_legacy_image, include_vulnerabilities=True):
 @show_if(features.SECURITY_SCANNER)
 @path_param("repository", "The full path of the repository. e.g. namespace/name")
 @path_param("manifestref", "The digest of the manifest")
+@anon_allowed
 class RepositoryManifestSecurity(RepositoryParamResource):
     """
     Operations for managing the vulnerabilities in a repository manifest.
@@ -91,12 +99,18 @@ class RepositoryManifestSecurity(RepositoryParamResource):
 
     @process_basic_auth_no_pass
     @anon_allowed
-    @require_repo_read(allow_for_superuser=True)
+    # @require_repo_read(allow_for_superuser=True)
     @nickname("getRepoManifestSecurity")
     @disallow_for_app_repositories
     @parse_args()
     @query_param(
         "vulnerabilities", "Include vulnerabilities informations", type=truthy_bool, default=False
+    )
+    @query_param(
+        "raw",
+        "Returns a vulnerability report for the specified manifest from Clair",
+        type=truthy_bool,
+        default=False,
     )
     def get(self, namespace, repository, manifestref, parsed_args):
         repo_ref = registry_model.lookup_repository(namespace, repository)
@@ -107,4 +121,4 @@ class RepositoryManifestSecurity(RepositoryParamResource):
         if manifest is None:
             raise NotFound()
 
-        return _security_info(manifest, parsed_args.vulnerabilities)
+        return _security_info(manifest, parsed_args.vulnerabilities, parsed_args.raw)

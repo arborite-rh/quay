@@ -78,7 +78,7 @@ class NoopV4SecurityScanner(SecurityScannerInterface):
     """
 
     def load_security_information(
-        self, manifest_or_legacy_image, include_vulnerabilities=False, model_cache=None
+        self, manifest_or_legacy_image, include_vulnerabilities=False, raw=False, model_cache=None
     ):
         return SecurityInformationLookupResult.for_request_error("security scanner misconfigured")
 
@@ -155,7 +155,7 @@ class V4SecurityScanner(SecurityScannerInterface):
         )
 
     def load_security_information(
-        self, manifest_or_legacy_image, include_vulnerabilities=False, model_cache=None
+        self, manifest_or_legacy_image, include_vulnerabilities=False, raw=False, model_cache=None
     ):
         if not isinstance(manifest_or_legacy_image, ManifestDataType):
             return SecurityInformationLookupResult.with_status(
@@ -190,7 +190,7 @@ class V4SecurityScanner(SecurityScannerInterface):
             return self._secscan_api.vulnerability_report(manifest_or_legacy_image.digest)
 
         try:
-            if model_cache:
+            if model_cache and not raw:
                 security_report_key = cache_key.for_security_report(
                     manifest_or_legacy_image.digest, model_cache.cache_config
                 )
@@ -204,6 +204,9 @@ class V4SecurityScanner(SecurityScannerInterface):
             return SecurityInformationLookupResult.with_status(ScanLookupStatus.NOT_YET_INDEXED)
 
         # TODO(alecmerdler): Provide a way to indicate the current scan is outdated (`report.state != status.indexer_hash`)
+
+        if raw:
+            return report
 
         return SecurityInformationLookupResult.for_data(
             SecurityInformation(Layer(report["manifest_hash"], "", "", 4, features_for(report)))
@@ -370,7 +373,8 @@ class V4SecurityScanner(SecurityScannerInterface):
                 )
 
         def should_skip_indexing(manifest_candidate):
-            """Check whether this manifest was preempted by another worker.
+            """
+            Check whether this manifest was preempted by another worker.
             That would be the case if the manifest references a manifestsecuritystatus,
             or if the reindex threshold is no longer valid.
             """
